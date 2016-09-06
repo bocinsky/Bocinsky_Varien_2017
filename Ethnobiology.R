@@ -124,10 +124,10 @@ pdsi_norm_years <- 1981:2010
 cortez_weather <- c(FedData::get_ghcn_daily_station(ID="USC00051886", 
                                                     elements = c("TMIN","TMAX"), 
                                                     standardize = T, 
-                                                    raw.dir = "./OUTPUT/GHCN"),
+                                                    raw.dir = "./OUTPUT/DATA/GHCN"),
                     FedData::get_ghcn_daily_station(ID="USC00051886", 
                                                     elements = c("PRCP"), 
-                                                    raw.dir = "./OUTPUT/GHCN"))
+                                                    raw.dir = "./OUTPUT/DATA/GHCN"))
 
 # Calculate monthly weather data from the daily GHCN data
 cortez_weather_monthly <- cortez_weather %>%
