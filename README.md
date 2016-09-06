@@ -10,6 +10,8 @@ The analysis consists of three components. First, VEP-style paleoproduction esti
 
 This script makes heavy use of piping from the [magrittr](https://cran.r-project.org/web/packages/magrittr/vignettes/magrittr.html) package and the data manipulation functions in the [dplyr](https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html) package. External soils data from the USGS and weather data from NOAA are downloaded using the [FedData](https://github.com/bocinsky/FedData) package.
 
+For figure output, [Ghostscript](http://www.ghostscript.com/) and [ImageMagick](http://www.imagemagick.org/script/index.php) command-line tools are also required.
+
 Throughout the VEP productivity reconstruction, references are made to the canonical VEP reconstruction reference:
 
 Kohler, Timothy A. 2012. Modeling agricultural productivity and farming effort. In Kohler, T. A. and Varien, M. D., editors, *Emergence and Collapse of Early Villages: Models of Central Mesa Verde Archaeology*, chapter 6, pages 85–112. University of California Press, Berkeley, California.
