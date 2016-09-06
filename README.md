@@ -8,7 +8,7 @@ To run, clone this repository, then open `Ethnobiology.Rproj` in RStudio and the
 
 The analysis consists of three components. First, VEP-style paleoproduction estimates are generated for the locations of the Pueblo Farming Project gardens. Then, PFP data are analysed to estimate standard productivity across gardens. Finally, these data are brought together in a series of figures to be used in the manuscript.
 
-This script makes heavy use of piping from the [magrittr](https://cran.r-project.org/web/packages/magrittr/vignettes/magrittr.html) package and the data manipulation functions in the [dplyr](https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html) package.
+This script makes heavy use of piping from the [magrittr](https://cran.r-project.org/web/packages/magrittr/vignettes/magrittr.html) package and the data manipulation functions in the [dplyr](https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html) package. External soils data from the USGS and weather data from NOAA are downloaded using the [FedData](https://github.com/bocinsky/FedData) package.
 
 Throughout the VEP productivity reconstruction, references are made to the canonical VEP reconstruction reference:
 
