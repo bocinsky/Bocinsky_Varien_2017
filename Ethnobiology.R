@@ -379,9 +379,6 @@ garden_locations@data$id = rownames(garden_locations@data)
 garden_locations.points = ggplot2::fortify(garden_locations %>% sp::spTransform(sp::CRS("+proj=utm +nad=NAD83 +zone=12")), region="id") %>% as_data_frame()
 garden_locations.df = dplyr::full_join(garden_locations.points, garden_locations@data, by="id")
 
-soils_VEPII_yields.new <- soils_VEPII_yields
-soils_VEPII_yields.new$muname <- gsub()
-
 mai <- c(0,0,0,0)
 fig.width <- 6.5
 fig.height <- 4
