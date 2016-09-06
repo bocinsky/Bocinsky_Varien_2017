@@ -736,7 +736,7 @@ segments(x0 = seq(600,1300,100), x1 = seq(600,1300,100), y0 = 0, y1 = 500, col =
 lines(y = VEPI.paleoprod.mean.temporal, x = 600:1300)
 lines(y = VEPI.paleoprod.mean.temporal.smooth, x = 600:1300, col = "red")
 text(x = seq(600,1300,100), y = 550, labels = seq(600,1300,100), adj = c(0.5,1), cex=0.8, family='Helvetica Bold')
-text(x = 950, y = 600, labels = "Year A.D.", adj = c(0.5,1), cex=1, family='Helvetica Bold')
+text(x = 950, y = 600, labels = "Year AD", adj = c(0.5,1), cex=1, family='Helvetica Bold')
 
 axis(2, at = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,600), labels = F)
 dev.off()
