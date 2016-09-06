@@ -334,20 +334,18 @@ yields <- ears %>%
   dplyr::left_join(y = gardens, by = c("Season","Garden")) %>% # join back to gardens
   dplyr::ungroup() %>%
   dplyr::mutate(`Net kernel weight` = ifelse(is.na(`Net kernel weight`),0,`Net kernel weight`)) %>% #recode missing values to zeros; those clumps didn't produce
-  dplyr::select(Season:Clumps, Clumps, Spacing, Area) %>% #select these columns
-  dplyr::rename(`Garden area` = Area) %>% # clarify what area we are talking about
-  dplyr::mutate(`Yield by garden area` = (Clumps * `Net kernel weight`/1000)/(`Garden area` * 0.0001), # calculate raw yield, and convert to Kg/ha
-                `Yield by clump area` = (Clumps * `Net kernel weight`/1000)/((Spacing ^ 2) * Clumps * 0.0001), # yield by actual clump area
+  dplyr::select(Season:Clumps, Clumps, Spacing) %>% #select these columns
+  dplyr::mutate(`Yield by clump area` = (Clumps * `Net kernel weight`/1000)/((Spacing ^ 2) * Clumps * 0.0001), # yield by actual clump area
                 `Standardized yield` = (Clumps * `Net kernel weight`/1000)/((2 ^ 2) * Clumps * 0.0001) # yield by clump area with 2m spacing
                 ) %>% 
   dplyr::mutate(Variety = as.factor(Variety),
                 Garden = as.factor(Garden),
                 Season = as.factor(Season)) %>%
   dplyr::arrange(Season, Garden, Clump) %>% # sort by these variables
-  dplyr::select(Season, Garden, Variety, Clumps, Spacing, `Garden area`, Clump, `Net kernel weight`, `Yield by garden area`, `Yield by clump area`, `Standardized yield`) %>% # reorder columns
+  dplyr::select(Season, Garden, Variety, Clumps, Spacing, Clump, `Net kernel weight`, `Yield by clump area`, `Standardized yield`) %>% # reorder columns
   dplyr::group_by(Season, Garden) # calculations are by season and garden
 
-readr::write_excel_csv(yields,"./OUTPUT/DATA/yields.csv")
+readr::write_csv(yields,"./OUTPUT/DATA/yields.csv")
 
 ##### END PFP PRODUCTIVITY ESTIMATION #####
 
@@ -470,7 +468,7 @@ yields %>%
   dplyr::select(Garden, Season, Variety, Clumps, Spacing, `Yield by clump area`, `Standardized yield`) %>%
   dplyr::left_join(PFP_VEP_yields, by=c("Garden","Season")) %>%
   dplyr::rename(`VEP yield estimate` = Yield) %>%
-  write_excel_csv(path = "./OUTPUT/TABLES/garden_yields.csv")
+  write_csv(path = "./OUTPUT/TABLES/garden_yields.csv")
 ##### END garden_yields.csv #####
 
 ##### clump_yields.csv #####
@@ -478,7 +476,7 @@ yields %>%
 yields %>%
   dplyr::select(Garden, Season, Clump, `Net kernel weight`) %>%
   dplyr::arrange(Garden, Season, Clump) %>%
-  write_excel_csv(path = "./OUTPUT/TABLES/clump_yields.csv")
+  write_csv(path = "./OUTPUT/TABLES/clump_yields.csv")
 ##### END clump_yields.csv #####
 
 ##### soils_data.csv #####
@@ -496,7 +494,7 @@ soils_data %>%
   unique() %>%
   dplyr::select(muname, MUKEY, Garden, NPP:SCM_RED) %>%
   dplyr::rename(`Map unit name` = muname, `Map unit key` = MUKEY, `Net primary prod. (lb/ac)` = NPP, `Bean yield (lb/ac)` = bean_yield, `AWC 6–60 inches (in/in)` = lower_awc, `Hand planting factor` = SCM_RED, `PFP Gardens` = Garden) %>%
-  write_excel_csv(path = "./OUTPUT/TABLES/soils_data.csv")
+  write_csv(path = "./OUTPUT/TABLES/soils_data.csv")
 ##### END soils_data.csv #####
 
 ##### yields_standardized.pdf #####
@@ -590,7 +588,7 @@ yields %>%
                 `P-value` = p.value, 
                 `Lower CI` = conf.low, 
                 `Upper CI` = conf.high) %T>%
-  write_excel_csv(path = "./OUTPUT/TABLES/yield_correlations_standardized.csv") %>%
+  write_csv(path = "./OUTPUT/TABLES/yield_correlations_standardized.csv") %>%
   dplyr::ungroup() %>%
   dplyr::summarise(mean(Correlation))
 
@@ -645,7 +643,7 @@ yields %>%
                 `P-value` = p.value, 
                 `Lower CI` = conf.low, 
                 `Upper CI` = conf.high) %T>%
-  write_excel_csv(path = "./OUTPUT/TABLES/yield_correlations_clump_spacing.csv") %>%
+  write_csv(path = "./OUTPUT/TABLES/yield_correlations_clump_spacing.csv") %>%
   dplyr::ungroup() %>%
   dplyr::summarise(mean(Correlation))
 
