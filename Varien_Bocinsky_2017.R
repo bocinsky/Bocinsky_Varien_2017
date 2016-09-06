@@ -725,7 +725,7 @@ rect(col=colors[1:600], border=NA, ybottom=0:599, ytop=1:600, xleft=0.15, xright
 # text(x = 0.5, y=600, labels="> 600", adj=c(0.5,0.5), cex=0.65, family='Helvetica Bold')
 # text(x = 0.5, y=round(VEPI.paleoprod.mean), labels=round(VEPI.paleoprod.mean), adj=c(0.5,0.5), cex=0.65, family='Helvetica Bold')
 text(x = 0, y=300, labels="Yeild (kg/ha)", adj=c(0.5,1), cex=1, srt = 90, family='Helvetica Bold')
-text(x = 0.5, y = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,600), labels = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,"> 600"), adj=c(0.5,0.5), cex=0.65, family='Helvetica Bold')
+text(x = 0.5, y = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,600), labels = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,"> 600"), adj=c(0.5,0.5), cex=0.8, family='Helvetica Bold')
 
 par(mai=c(0.1,0.85,0.2 + plot.width * (nrow(VEPI.paleoprod)/ncol(VEPI.paleoprod)),0.1), xpd=T, new=T)
 plot(1, type='n', xlab="", ylab="", xlim=c(580,1320), ylim=c(0,600), xaxs="i", yaxs="i", axes=FALSE, main='')
