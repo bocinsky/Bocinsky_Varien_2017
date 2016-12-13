@@ -44,6 +44,7 @@ FedData::pkg_test("rgeos")
 FedData::pkg_test("broom")
 FedData::pkg_test("maptools")
 FedData::pkg_test("dplyr")
+FedData::pkg_test("doParallel")
 
 # Load other useful functions
 for(f in list.files("./src", pattern = ".R", full.names = T)){
@@ -71,44 +72,15 @@ seasons <- 2009:2015
 
 ##### BEGIN VEP PRODUCTIVITY ESTIMATION #####
 
-### SOILS ###
+### SOILS & PRODUCTIVITY ###
+# Import VEPI Paleoproductivity
+vepi.paleoprod <- raster::brick("./DATA/vepi_paleoprod.tif")
 
 # Load a polygon of the Indian Camp Ranch + Crow Canyon study area
-CCAC <- rgdal::readOGR(dsn = "./DATA/ccac.geojson", "OGRGeoJSON", verbose = FALSE)
+ccac <- rgdal::readOGR(dsn = "./DATA/ccac.geojson", "OGRGeoJSON", verbose = FALSE)
 
-# Download the NRCS SSURGO soils data for the study area
-# This downloads the soils data for the CO671 soil survey
-CCAC_SSURGO <- FedData::get_ssurgo(template=CCAC, label="CCAC", raw.dir="./OUTPUT/DATA/SSURGO/RAW/", extraction.dir="./OUTPUT/DATA/SSURGO/EXTRACTIONS/", force.redo=F)
-
-## Convert all tables to tibbles
-CCAC_SSURGO$tabular <- lapply(CCAC_SSURGO$tabular,dplyr::as_data_frame)
-
-# Calculate all mapunit-level NPP, bean productivity, available water content, and hand planting restriction
-CCAC_SSURGO <- CCAC_SSURGO %>%
-  calculate_mukey_annual_npp() %>% # Calculate annual NPP
-  calculate_mukey_bean_productivity() %>% # Calculate bean productivity
-  calculate_mukey_awc() %>% # Calculate and output AWC
-  calculate_mukey_hand_planting_restriction() # Calculate hand-planting restriction
-
-# Add the data to the shapefile of soil mapunits
-soils <- CCAC_SSURGO$spatial
-soils@data <- dplyr::left_join(soils@data,CCAC_SSURGO$tabular$mapunit %>%
-                                 dplyr::select(mukey,muname) %>%
-                                 dplyr::mutate(mukey = as.factor(mukey)),
-                               by = c("MUKEY" = "mukey"))
-
-# Calculate area of each mapunit
-soils$area <- rgeos::gArea(spTransform(soils,CRS("+proj=utm +datum=NAD83 +zone=12")),byid=T)
-
-# Clean up the data
-soils@data <- soils@data %>%
-  dplyr::select(-area,-AREASYMBOL,-SPATIALVER, -MUSYM) %>%
-  dplyr::as_data_frame() %>%
-  as.data.frame()
-
-unlink('./OUTPUT/DATA/soils')
-rgdal::writeOGR(soils,dsn='./OUTPUT/DATA/soils',layer="soils",driver="GeoJSON",overwrite=T)
-file.rename('./OUTPUT/DATA/soils','./OUTPUT/DATA/soils.geojson')
+# Load the VEP I soils data for Indian Camp Ranch / CCAC
+vepi.soils.ccac <- rgdal::readOGR(dsn = "./DATA/vepi_soils_ccac.geojson", "OGRGeoJSON", verbose = FALSE)
 
 ### PDSI ###
 # Kohler 2012: Steps 2--3 (pp. 90--92)
@@ -189,38 +161,45 @@ cortez_weather_monthly <- cortez_weather_monthly %>%
   dplyr::arrange(YEAR,MONTH) %>% # Sort by year and month
   dplyr::full_join(expand.grid(YEAR = burnin_start:max(seasons), MONTH = 1:12), by=c("YEAR","MONTH")) # Add NAs at end if ending in current year
 
-## Read in the soils data generated above
-soils <- rgdal::readOGR(dsn = "./OUTPUT/DATA/soils.geojson", "OGRGeoJSON", verbose = FALSE)
-
-# Calculate the centroid of each soil and add to the data table
-soils_data <- cbind(soils@data, as.data.frame(rgeos::gCentroid(soils, byid=T)))
+# Get the VEP I latitude for calculating PDSI
+# Following Kohler 2012:92 we use
+# the latitude at the center of the study area
+vepi_latitude <- vepi.paleoprod %>%
+  FedData::polygon_from_extent() %>%
+  sp::spTransform(sp::CRS("+proj=longlat +ellps=WGS84")) %>%
+  sp::bbox() %>%
+  rowMeans() %>%
+  magrittr::extract("y")
 
 ## Produce PDSI estimates for each soil
-# Create an output directory for PDSI data
-dir.create("./OUTPUT/DATA/PDSI/", showWarnings = FALSE, recursive = TRUE)
-output.dir <- "./OUTPUT/DATA/PDSI/"
-scPDSI.path <- "./src/scpdsi"
+# Download the scpdsi C code from GitHub
+FedData::download_data("https://raw.githubusercontent.com/crowcanyon/vep_paleoprod/master/src/scpdsi_r.cpp",
+                       destdir = "./src/")
 
-# Create a "blank" PDSI brick
-# Calculate June Monthly PDSI for each soil
-# THIS WILL ONLY RUN ON A MAC OR OTHER UNIX-ALIKE
-monthly_T <- data.frame(year=unique(cortez_weather_monthly$YEAR),matrix(paste0(" ",gsub("0000NA","",sprintf("%06.3f",cortez_weather_monthly$TAVG_F))),ncol=12,byrow=T), stringsAsFactors=F)
-monthly_P <- data.frame(year=unique(cortez_weather_monthly$YEAR),matrix(paste0(" ",gsub("0000NA","",sprintf("%06.3f",cortez_weather_monthly$PRCP_IN))),ncol=12,byrow=T), stringsAsFactors=F)
-mon_T_normal <- data.frame(matrix(paste0(" ",as.character(formatC(cortez_weather_monthly_norms$TAVG_F, format = 'f', digits = 3, width=6))),ncol=12,byrow=T), stringsAsFactors=F)
-mon_T_normal[1,1] <- paste0(" ",mon_T_normal[1,1])
-Monthly_PDSI <- lapply(1:nrow(soils_data),FUN = function(x){
-  return(rPDSI(output.dir = output.dir, monthly_T = monthly_T, monthly_P = monthly_P, mon_T_normal = mon_T_normal, awc = soils_data[x,'lower_awc'], lat = soils_data[x,'y'], scPDSI.path = scPDSI.path))
-}) %>%
-  lapply(FUN = function(x){
-    out <- dplyr::bind_cols(cortez_weather_monthly %>% dplyr::select(YEAR,MONTH),x) %>%
-      dplyr::filter(YEAR %in% seasons, MONTH == 6) %>%
-      dplyr::select(YEAR,PDSI) %>%
-      collect %>%
-      .[["PDSI"]]
-    names(out) <- seasons
-    return(out)
-  })
+# Load the PDSI c program
+Rcpp::sourceCpp("./src/scpdsi_r.cpp")
 
+# Run the PDSI program for each soil
+# This operates in parallel; it will register the number of cores appropriate to your machine
+registerDoParallel()
+vepi.soils.ccac.pdsi <- foreach::foreach(soil = 1:nrow(vepi.soils.ccac)) %dopar% {
+  
+  out <- scpdsi(monthly_T = cortez_weather_monthly$TAVG_F,
+         monthly_P = cortez_weather_monthly$PRCP_IN,
+         mon_T_normal = cortez_weather_monthly_norms$TAVG_F,
+         awc = vepi.soils.ccac@data[soil,"AWC_Lower_median"],
+         lat = vepi_latitude,
+         start_year = burnin_start,
+         end_year = max(seasons))
+  expand.grid(YEAR = burnin_start:max(seasons), MONTH = 1:12) %>%
+    tibble::as_tibble() %>%
+    dplyr::arrange(YEAR,MONTH) %>%
+    dplyr::mutate(PDSI = out) %>%
+    dplyr::filter(YEAR %in% seasons, MONTH == 6) %>%
+    dplyr::select(YEAR,PDSI) 
+  
+}
+stopImplicitCluster()
 
 ### RECONSTRUCTION ###
 ## There are 5 components to the reconstruction back in time: 
@@ -245,16 +224,16 @@ intercept <- coefficients(VEPI_LM)['(Intercept)']
 ## Estimate potential maize production for each year, for each soil
 # Perform the prediction
 # Retrodiction equation (per cell): prediction ~ pdsi.coef*modern.PDSI + intercept
-predictions <- lapply(Monthly_PDSI,function(x){
-  (pdsi.coef*x + intercept) * 62.77 # Convert to kg/ha
+predictions <- lapply(vepi.soils.ccac.pdsi,function(x){
+  ((pdsi.coef * x$PDSI) + intercept) * 62.77 # Convert to kg/ha
 })
 predictions <- do.call(rbind,predictions)
 
 ## Re-weight production for each soil 
 # Read in the NRCS normal year dry-weight soil productivity (NPP) & Bean Soils
-NPP.bean.mean <- 1093 * 1.12085 # Mean Bean Soil NPP for all VEP I soils, converted to kg/ha 
-NPP.reweight <- soils_data$NPP/NPP.bean.mean
-predictions <- sweep(predictions,MARGIN=1,NPP.reweight,`*`)
+NPP.bean.mean <- 1093 # Mean Bean Soil NPP for all VEP I soils, in lbs/ac
+NPP.reweight <- vepi.soils.ccac$NYProd_lb_ac/NPP.bean.mean
+predictions <- sweep(predictions, MARGIN=1, NPP.reweight,`*`)
 
 ## We depart a bit from the methods described in Kohler 2012. Before, the retrodicted values
 ## would be multiplied by the NPP renormed values, then loaded into the simulation, where they 
@@ -265,25 +244,55 @@ predictions <- sweep(predictions,MARGIN=1,NPP.reweight,`*`)
 ## RENORM MAIZE PRODUCTION FOR PREHISPANIC VARIETIES AND CULTIVATION PRACTICES
 # Kohler 2012: Step 9 (pp. 100--103)
 renorm.factor <- 0.68
-predictions <- predictions * 0.68
+predictions <- predictions * renorm.factor
 
 ## MAKE HAND-PLANTING ADJUSTMENT
 # Kohler 2012: Step 10 (pp. 103)
 # Read in hand-planting factor from the soils data
-predictions <- sweep(predictions,MARGIN=1,soils_data$SCM_RED,`*`)
-
+predictions <- sweep(predictions,MARGIN=1,vepi.soils.ccac$SCM_RED,`*`)
+colnames(predictions) <- seasons
 
 ## MAKE COLD CORRECTION
 # Kohler 2012: Step 11 (pp. 103--106)
 # We don't make the cold correction here, because CCAC PFP gardens are below 7,000 feet.
 
-# Write yield info to soils shapefile
-soils@data <- cbind(soils@data,predictions)
+# Write yield info to soils geojson file
+vepi.soils.ccac@data <- cbind(vepi.soils.ccac@data,predictions %>% tibble::as_tibble())
+geojsonio::geojson_write(vepi.soils.ccac,file = "./OUTPUT/DATA/vepi.soils.ccac_yields.geojson")
 
-unlink('./OUTPUT/DATA/soils_VEPII_yields')
-rgdal::writeOGR(soils,dsn='./OUTPUT/DATA/soils_VEPII_yields',layer="soils_VEPII_yields",driver="GeoJSON",overwrite=T)
-file.rename('./OUTPUT/DATA/soils_VEPII_yields','./OUTPUT/DATA/soils_VEPII_yields.geojson')
+# Rasterize data based on VEPI 200m simulation grid
+# A function to rasterize each variable in a Spatial* object, and write the outputs as GeoTIFFs
+# This operates in parallel; it will register the number of cores appropriate to your machine
+rasterize_each <- function(x, y, force.redo = F){
+  # Transform the polygons into the coordinate reference system of the study area
+  x %<>%
+    sp::spTransform(sp::CRS(raster::projection(y)))
+  
+  registerDoParallel()
+  out <- foreach::foreach(var = names(x), .combine = raster::stack) %dopar% {
+    if(file.exists(paste0("./OUTPUT/DATA/vepi_soils_ccac_raster_",var,".tif")) & !force.redo)
+      return(raster::raster(paste0("./OUTPUT/DATA/vepi_soils_ccac_raster_",var,".tif")))
+    
+    out <- x %>%
+      raster::rasterize(y = y,
+                        field = var,
+                        fun = mean) %>%
+      raster::crop(y = x, snap = "out") %T>%
+      writeRaster(paste0("./OUTPUT/DATA/vepi_soils_ccac_raster_",var,".tif"),
+                  datatype = "FLT4S",
+                  options = c("COMPRESS=DEFLATE", "ZLEVEL=9", "INTERLEAVE=BAND"),
+                  overwrite = T,
+                  setStatistics = FALSE)
+    return(out)
+  }
+  stopImplicitCluster()
+  return(out)
+}
 
+# Rasterize and write each variable
+vepi.soils.ccac.raster <- vepi.soils.ccac[,c("CLUSTER","VPSCode","AWC_Lower_median","NYProd_lb_ac","SCM_RED",as.character(seasons))] %>%
+  rasterize_each(y = vepi.paleoprod)
+names(vepi.soils.ccac.raster) <- c("CLUSTER","VPSCode","AWC_Lower_median","NYProd_lb_ac","SCM_RED",as.character(seasons))
 ##### END VEP PRODUCTIVITY ESTIMATION #####
 
 ##### BEGIN PFP PRODUCTIVITY ESTIMATION #####
@@ -335,14 +344,22 @@ yields <- ears %>%
   dplyr::ungroup() %>%
   dplyr::mutate(`Net kernel weight` = ifelse(is.na(`Net kernel weight`),0,`Net kernel weight`)) %>% #recode missing values to zeros; those clumps didn't produce
   dplyr::select(Season:Clumps, Clumps, Spacing) %>% #select these columns
-  dplyr::mutate(`Yield by clump area` = (Clumps * `Net kernel weight`/1000)/((Spacing ^ 2) * Clumps * 0.0001), # yield by actual clump area
-                `Standardized yield` = (Clumps * `Net kernel weight`/1000)/((2 ^ 2) * Clumps * 0.0001) # yield by clump area with 2m spacing
+  dplyr::mutate(#`Yield by clump area` = (Clumps * `Net kernel weight`/1000)/((Spacing ^ 2) * Clumps * 0.0001), # yield by actual clump area
+                `PFP experimental yield` = (Clumps * `Net kernel weight`/1000)/((2 ^ 2) * Clumps * 0.0001) # yield by clump area with 2m spacing
                 ) %>% 
   dplyr::mutate(Variety = as.factor(Variety),
                 Garden = as.factor(Garden),
                 Season = as.factor(Season)) %>%
   dplyr::arrange(Season, Garden, Clump) %>% # sort by these variables
-  dplyr::select(Season, Garden, Variety, Clumps, Spacing, Clump, `Net kernel weight`, `Yield by clump area`, `Standardized yield`) %>% # reorder columns
+  dplyr::select(Season,
+                Garden,
+                Variety,
+                Clumps,
+                Spacing,
+                Clump,
+                `Net kernel weight`,
+                # `Yield by clump area`,
+                `PFP experimental yield`) %>% # reorder columns
   dplyr::group_by(Season, Garden) # calculations are by season and garden
 
 readr::write_csv(yields,"./OUTPUT/DATA/yields.csv")
@@ -352,15 +369,15 @@ readr::write_csv(yields,"./OUTPUT/DATA/yields.csv")
 ##### BEGIN JOINT ANALYSIS #####
 ## Extract the VEP yield reconstructions under the PFP gardens
 # Read in the VEP productivity reconstruction from above
-soils_VEPII_yields <- rgdal::readOGR(dsn = "./OUTPUT/DATA/soils_VEPII_yields.geojson", "OGRGeoJSON", verbose = FALSE)
-soils_VEPII_yields$muname <- gsub(" MLRA 36","",soils_VEPII_yields$muname)
+soils_VEPI_yields <- rgdal::readOGR(dsn = "./OUTPUT/DATA/vepi.soils.ccac_yields.geojson", "OGRGeoJSON", verbose = FALSE)
+soils_VEPI_yields$muname <- gsub(" MLRA 36","",soils_VEPI_yields$muname)
 
 PFP_VEP_yields <- garden_locations %>%
   rgeos::gCentroid(byid=T) %>% # Get the centroid under each garden
-  sp::spTransform(sp::CRS(raster::projection(soils_VEPII_yields))) %>% # transform into the same projection
-  raster::extract(x = soils_VEPII_yields) %>%
+  sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster))) %>% # transform into the same projection
+  raster::extract(x = vepi.soils.ccac.raster) %>%
+  tibble::as_tibble() %>%
   dplyr::mutate(Garden = garden_locations$Abbreviation) %>%
-  dplyr::select(Garden,MUKEY:SCM_RED,X2009:X2015) %>%
   tidyr::gather(Season, Yield, X2009:X2015) %>%
   dplyr::as_data_frame() %>%
   dplyr::mutate(Season = gsub("X","",Season) %>% as.factor()) %>%
@@ -369,29 +386,29 @@ PFP_VEP_yields <- garden_locations %>%
 
 ##### garden_soils_map.pdf #####
 ## A map showing the soils on the CCAC campus and the locations of the PFP gardens
+## Map of NRCS soil complexes (mapunits) on the Crow Canyon campus, 
+## and the locations of experimental gardens reported here. 
+## CDG: check dam garden; KUG: Karen’s upper garden; 
+## PLC: Pueblo Learning Center garden; POG: Paul’s old garden.
 # Prepare the data for plotting in ggplot2
-soils_VEPII_yields@data$id = rownames(soils_VEPII_yields@data)
-soils_VEPII_yields.points = ggplot2::fortify(soils_VEPII_yields %>% sp::spTransform(sp::CRS("+proj=utm +nad=NAD83 +zone=12")), region="id") %>% as_data_frame()
-soils_VEPII_yields.df = dplyr::full_join(soils_VEPII_yields.points, soils_VEPII_yields@data, by="id")
+soils_VEPI_yields %<>% sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster)))
+soils_VEPI_yields@data$id = rownames(soils_VEPI_yields@data)
+soils_VEPI_yields.points = ggplot2::fortify(soils_VEPI_yields, region="id") %>% as_data_frame()
+soils_VEPI_yields.df = dplyr::full_join(soils_VEPI_yields.points, soils_VEPI_yields@data, by="id")
+garden_locations %<>% sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster)))
 garden_locations@data$id = rownames(garden_locations@data)
-garden_locations.points = ggplot2::fortify(garden_locations %>% sp::spTransform(sp::CRS("+proj=utm +nad=NAD83 +zone=12")), region="id") %>% as_data_frame()
+garden_locations.points = ggplot2::fortify(garden_locations, region="id") %>% as_data_frame()
 garden_locations.df = dplyr::full_join(garden_locations.points, garden_locations@data, by="id")
 
-mai <- c(0,0,0,0)
-fig.width <- 6.5
-fig.height <- 4
-
-quartz(file="./OUTPUT/FIGURES/garden_soils_map.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
-par(mai=mai, xpd=F)
-ggplot(soils_VEPII_yields.df) +
-  aes(long,lat,group=group,fill=paste0(gsub(", ",",\n",muname), "\n")) +
+vep_soil_polygons <- ggplot(soils_VEPI_yields.df) +
+  aes(long,lat,group=group,fill=factor(VPSCode, levels = sort(unique(VPSCode)))) +
   geom_polygon() + 
+  ggtitle("Soil mapunit polygons") +
   geom_path(color="white") +
   coord_equal() +
   scale_fill_brewer(name = NULL, type="qual", palette = "Set3") +
   geom_polygon(data = garden_locations.df, mapping = aes(long,lat,group=group), inherit.aes = F) +
   geom_text(data = garden_locations %>%
-              sp::spTransform(sp::CRS("+proj=utm +nad=NAD83 +zone=12")) %>%
               rgeos::gCentroid(byid=T) %>% as.data.frame() %>%
               cbind(garden_locations@data),
             mapping = aes(x,
@@ -401,355 +418,350 @@ ggplot(soils_VEPII_yields.df) +
                           hjust = c(0,0,1,0)), 
             inherit.aes = F,
             nudge_x = c(10,10,-10,10),
-            nudge_y = 10
+            nudge_y = 10,
+            size=3, color = "black"
               ) +
   xlab("Easting") +
   ylab("Northing") +
+  xlim(710000,711600) +
+  ylim(4136400,4137800) +
   theme(axis.text=element_text(size=8, color = "black"),
         title=element_text(size=8,face="bold", color = "black"),
         legend.text=element_text(size=6, color = "black"))
-dev.off()
-distill("./OUTPUT/FIGURES/garden_soils_map.pdf")
 
 ##### END garden_soils_map.pdf #####
 
 ##### soils_vars_grid.pdf #####
 ## A grid of maps showing the salient soil characteristics
+## Maps of soil characteristics included in the Village Ecodynamics Project 
+## maize paleoproductivity reconstructions.
 # Prepare the data for plotting in ggplot2
-soils_VEPII_yields@data$id = rownames(soils_VEPII_yields@data)
-soils_VEPII_yields.points = ggplot2::fortify(soils_VEPII_yields %>% sp::spTransform(sp::CRS("+proj=utm +nad=NAD83 +zone=12")), region="id") %>% as_data_frame()
-soils_VEPII_yields.df = dplyr::full_join(soils_VEPII_yields.points, soils_VEPII_yields@data, by="id")
+ccac_nad27 <- ccac %>% sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster)))
+
+vep_soil_raster_soils <- rasterVis::gplot(vepi.soils.ccac.raster[["VPSCode"]] %>% raster::crop(ccac_nad27)) + 
+  geom_raster(aes(fill=factor(value, levels = sort(unique(soils_VEPI_yields.df$VPSCode)))), na.rm = T) +
+  ggtitle("Rasterized soils") +
+  coord_equal() +
+  scale_fill_brewer(name = NULL,
+                    type="qual",
+                    palette = "Set3",
+                    na.translate = FALSE,
+                    drop = FALSE) +
+  geom_polygon(data = garden_locations.df, mapping = aes(long,lat,group=group), inherit.aes = F) +
+  geom_text(data = garden_locations %>%
+              rgeos::gCentroid(byid=T) %>% as.data.frame() %>%
+              cbind(garden_locations@data),
+            mapping = aes(x,
+                          y,
+                          label = Abbreviation,
+                          vjust = 0,
+                          hjust = c(0,0,1,0)), 
+            inherit.aes = F,
+            nudge_x = c(10,10,-10,10),
+            nudge_y = 10,
+            size=3, color = "black"
+  ) +
+  xlab("Easting") +
+  ylab("Northing") +
+  xlim(710000,711600) +
+  ylim(4136400,4137800) +
+  theme(axis.text=element_text(size=8, color = "black"),
+        title=element_text(size=8,face="bold", color = "black"),
+        legend.text=element_text(size=6, color = "black"))
+
+vep_soil_raster_clusters <- rasterVis::gplot(vepi.soils.ccac.raster[["CLUSTER"]]) + 
+  geom_raster(aes(fill=factor(value, levels = sort(unique(value)))), na.rm = T) +
+  ggtitle("VEP soil clusters") +
+  coord_equal() +
+  scale_fill_brewer(name = NULL,
+                    type="qual",
+                    palette = "Set3",
+                    na.translate = FALSE,
+                    drop = FALSE) +
+  geom_polygon(data = garden_locations.df, mapping = aes(long,lat,group=group), inherit.aes = F) +
+  geom_text(data = garden_locations %>%
+              rgeos::gCentroid(byid=T) %>% as.data.frame() %>%
+              cbind(garden_locations@data),
+            mapping = aes(x,
+                          y,
+                          label = Abbreviation,
+                          vjust = 0,
+                          hjust = c(0,0,1,0)), 
+            inherit.aes = F,
+            nudge_x = c(10,10,-10,10),
+            nudge_y = 10,
+            size=3, color = "black"
+  ) +
+  xlab("Easting") +
+  ylab("Northing") +
+  xlim(710000,711600) +
+  ylim(4136400,4137800) +
+  theme(axis.text=element_text(size=8, color = "black"),
+        title=element_text(size=8,face="bold", color = "black"),
+        legend.text=element_text(size=6, color = "black"))
 
 multiplot <- function(vars, limits, titles){
   mapply(vars, limits, titles, SIMPLIFY = F, FUN = function(the.var,the.limit,the.title){
-    out <- ggplot(soils_VEPII_yields.df) + 
+    out <- rasterVis::gplot(vepi.soils.ccac.raster[[the.var]]) + 
+      geom_raster(aes(fill = value), na.rm = T) +
       ggtitle(the.title) +
-      aes_string("long","lat",group="group",fill=the.var) + 
-      geom_polygon() +
-      geom_path(color="white") +
       coord_equal() +
-      scale_fill_distiller(name = NULL, limits = the.limit, palette = "YlGn", direction = 1) +
+      scale_fill_distiller(name = NULL,
+                           limits = the.limit,
+                           palette = "YlGn",
+                           direction = 1,
+                           na.value = NA) +
+      geom_polygon(data = garden_locations.df, mapping = aes(long,lat,group=group), inherit.aes = F) +
+      geom_text(data = garden_locations %>%
+                  rgeos::gCentroid(byid=T) %>% as.data.frame() %>%
+                  cbind(garden_locations@data),
+                mapping = aes(x,
+                              y,
+                              label = Abbreviation,
+                              vjust = 0,
+                              hjust = c(0,0,1,0)), 
+                inherit.aes = F,
+                nudge_x = c(10,10,-10,10),
+                nudge_y = 10,
+                size=3, color = "black"
+      ) +
       xlab("Easting") +
       ylab("Northing") +
+      xlim(710000,711600) +
+      ylim(4136400,4137800) +
       theme(axis.text=element_text(size=8, color = "black"),
             title=element_text(size=8,face="bold", color = "black"),
             legend.text=element_text(size=6, color = "black"))
     return(ggplotGrob(out))
   })
 }
-vars <- c("NPP","bean_yield","lower_awc","SCM_RED")
-limits <- list(c(0,1250), c(0,500), c(0,8), c(0.85,1))
-titles <- c("Net primary productivity (lb/ac)", "Bean yield (lb/ac)", "AWC 6–60 inches (in/in)", "Hand planting factor")
+vars <- c("NYProd_lb_ac","AWC_Lower_median","SCM_RED")
+limits <- list(c(0,1250), c(0,10), c(0,1))
+titles <- c("Normal-year productivity (lb/ac)", "AWC 6–60 inches (in/in)", "Hand planting factor")
 
 the.plots <- multiplot(vars, limits, titles)
 
-mai <- c(0,0,0,0)
-fig.width <- 9
-fig.height <- 6.5
+the.plots <- c(list(vep_soil_polygons = ggplotGrob(vep_soil_polygons),vep_soil_raster_soils = ggplotGrob(vep_soil_raster_soils),vep_soil_raster_clusters = ggplotGrob(vep_soil_raster_clusters)),the.plots)
 
-quartz(file="./OUTPUT/FIGURES/soils_vars_grid.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
+mai <- c(0,0,0,0)
+fig.width <- 7.5
+fig.height <- 8.5
+
+cairo_pdf(file="./OUTPUT/FIGURES/soils_vars_grid.pdf", width=fig.width, height=fig.height, antialias="none", bg="white", pointsize=6)
 par(mai=mai, xpd=F)
-gridExtra::grid.arrange(grobs = the.plots, nrow=2)
+gridExtra::grid.arrange(grobs = the.plots, nrow=3)
 dev.off()
 distill("./OUTPUT/FIGURES/soils_vars_grid.pdf")
-
 ##### END soils_vars_grid.pdf #####
 
 
 ##### garden_yields.csv #####
 ## Basic data on each garden
-yields %>%
-  dplyr::select(Garden, Season, `Yield by clump area`, `Standardized yield`) %>%
+garden_yields <- yields %>%
+  dplyr::select(Garden, Season, 
+                # `Yield by clump area`, 
+                `PFP experimental yield`) %>%
   dplyr::group_by(Garden, Season) %>%
-  dplyr::summarise(`Yield by clump area` = mean(`Yield by clump area`), `Standardized yield` = mean(`Standardized yield`)) %>%
+  dplyr::summarise(
+    # `Yield by clump area` = mean(`Yield by clump area`), 
+    `PFP experimental yield` = mean(`PFP experimental yield`)
+  ) %>%
   dplyr::left_join(yields %>%
                      dplyr::select(Garden, Season, Variety, Clumps, Spacing) %>%
                      unique(), by = c("Garden","Season")) %>%
-  dplyr::select(Garden, Season, Variety, Clumps, Spacing, `Yield by clump area`, `Standardized yield`) %>%
+  dplyr::select(Garden, Season, Variety, Clumps, Spacing,
+                # `Yield by clump area`,
+                `PFP experimental yield`) %>%
   dplyr::left_join(PFP_VEP_yields, by=c("Garden","Season")) %>%
-  dplyr::rename(`VEP yield estimate` = Yield) %>%
-  write_csv(path = "./OUTPUT/TABLES/garden_yields.csv")
+  dplyr::rename(`VEP estimated yield` = Yield)
+
+garden_yields %>% 
+    dplyr::mutate(`PFP experimental yield` = round(`PFP experimental yield`, digits = 1),
+                  `VEP estimated yield` = round(`VEP estimated yield`, digits = 1)) %>%
+      write_csv(path = "./OUTPUT/TABLES/garden_yields.csv")
+
 ##### END garden_yields.csv #####
 
 ##### clump_yields.csv #####
 ## Basic data on each clump
-yields %>%
+clump_yields <- yields %>%
   dplyr::select(Garden, Season, Clump, `Net kernel weight`) %>%
-  dplyr::arrange(Garden, Season, Clump) %>%
+  dplyr::arrange(Garden, Season, Clump) 
+
+clump_yields %>%
   write_csv(path = "./OUTPUT/TABLES/clump_yields.csv")
 ##### END clump_yields.csv #####
 
 ##### soils_data.csv #####
 soils_data <- garden_locations %>%
   rgeos::gCentroid(byid=T) %>% # Get the centroid under each garden
-  sp::spTransform(sp::CRS(raster::projection(soils_VEPII_yields))) %>% # transform into the same projection
-  raster::extract(x = soils_VEPII_yields) %>%
-  dplyr::mutate(Garden = garden_locations$Abbreviation)
+  sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster))) %>% # transform into the same projection
+  raster::extract(x = vepi.soils.ccac.raster) %>%
+  tibble::as_tibble() %>%
+  dplyr::mutate(Garden = garden_locations$Abbreviation) %>%
+  dplyr::left_join(vepi.soils.ccac@data %>%
+                     dplyr::select(VPSCode, muname, MUKEY) %>%
+                     dplyr::distinct(), by = "VPSCode")
 
 soils_data %>%
-  dplyr::select(MUKEY, Garden) %>%
-  dplyr::group_by(MUKEY) %>%
-  dplyr::summarise(Garden = paste0(Garden, collapse = ", ")) %>%
-  dplyr::left_join(soils_data %>% dplyr::select(-Garden, -point.ID, -poly.ID, -upper_awc), by = ("MUKEY")) %>%
-  unique() %>%
-  dplyr::select(muname, MUKEY, Garden, NPP:SCM_RED) %>%
-  dplyr::rename(`Map unit name` = muname, `Map unit key` = MUKEY, `Net primary prod. (lb/ac)` = NPP, `Bean yield (lb/ac)` = bean_yield, `AWC 6–60 inches (in/in)` = lower_awc, `Hand planting factor` = SCM_RED, `PFP Gardens` = Garden) %>%
+  dplyr::select(muname, MUKEY, VPSCode, CLUSTER, Garden, AWC_Lower_median:SCM_RED) %>%
+  dplyr::rename(`Map unit name` = muname,
+                `Map unit key` = MUKEY,
+                `VEP soil ID` = VPSCode,
+                `VEP soil cluster` = CLUSTER,
+                `Normal-year prod. (lb/ac)` = NYProd_lb_ac,
+                `AWC 6–60 inches (in/in)` = AWC_Lower_median,
+                `Hand planting factor` = SCM_RED,
+                `PFP Garden` = Garden) %>%
+  dplyr::mutate(`AWC 6–60 inches (in/in)` = round(`AWC 6–60 inches (in/in)`, digits = 2),
+                `Hand planting factor` = round(`Hand planting factor`, digits = 2),
+                `Normal-year prod. (lb/ac)` = round(`Normal-year prod. (lb/ac)`, digits = 1)) %>%
   write_csv(path = "./OUTPUT/TABLES/soils_data.csv")
 ##### END soils_data.csv #####
 
-##### yields_standardized.pdf #####
+##### yields.pdf #####
 ## A visual comparison between the experimental and VEP estimated yields
+## Experimental (PFP) and estimated (VEP) garden yields.
+## Box plots indicate the distribution of experimental yields as extrapolated from individual clumps.
+## Asterisks mark the distribution means.
+## The CDG, POG, and PLC gardens all occur in the same NRCS soil mapunit, 
+## and therefor share the same estimated yield.
 mai <- c(0.25,0.25,0,0)
 fig.width <- 5
 fig.height <- 2
 
-quartz(file="./OUTPUT/FIGURES/yields_standardized.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
+quartz(file="./OUTPUT/FIGURES/yields.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
 par(mai=mai, xpd=F)
 
 ggplot() + 
-  geom_boxplot(data = yields, mapping = aes(y = `Standardized yield`, x = Season, fill = Garden), outlier.size = 0.5, size = 0.25, colour = "black") +
-  scale_fill_brewer("Garden Yields:\nExperimental", palette="OrRd") +
+  geom_boxplot(data = yields,
+               mapping = aes(y = `PFP experimental yield`, x = Season, fill = Garden),
+               outlier.size = 0.5,
+               size = 0.25,
+               colour = "black") +
+  scale_fill_brewer("Garden Yields:\nPFP Experiments", palette="OrRd") +
   stat_summary(data = yields,
-               mapping = aes(y = `Standardized yield`, x = Season, fill = Garden),
+               mapping = aes(y = `PFP experimental yield`, x = Season, fill = Garden),
                fun.y=mean,
                colour="black", 
                geom="point",
                position=position_dodge(width=0.75),
                size = 0.75,
                shape = 8) +
-  geom_line(data = PFP_VEP_yields %>%
-              dplyr::mutate(Garden = ifelse(Garden == "KUG","KUG","CDG, POG, PLC")) %>%
-              unique(),
-            mapping = aes(x=Season, y=Yield, group = Garden, linetype = Garden), 
+  geom_line(data = PFP_VEP_yields,
+            mapping = aes(x=Season, y=Yield, group = Garden, colour = Garden), 
             size = 0.25
             ) +
-  scale_linetype("Garden Yields:\nVEP Estimates") +
+  scale_colour_brewer("Garden Yields:\nVEP Estimates", palette="OrRd") +
   ylab("Yield (kg/ha)") +
   theme(axis.text=element_text(size=6, color = "black"),
         title=element_text(size=8,face="bold", color = "black"),
         legend.text=element_text(size=6, color = "black"))
 
 dev.off()
-distill("./OUTPUT/FIGURES/yields_standardized.pdf")
+distill("./OUTPUT/FIGURES/yields.pdf")
 
-##### END yields_standardized.pdf #####
-
-##### yields_clump_spacing.pdf #####
-## A visual comparison between the experimental and VEP estimated yields
-mai <- c(0.25,0.25,0,0)
-fig.width <- 5
-fig.height <- 2
-
-quartz(file="./OUTPUT/FIGURES/yields_clump_spacing.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
-par(mai=mai, xpd=F)
-
-ggplot() + 
-  geom_boxplot(data = yields, mapping = aes(y = `Yield by clump area`, x = Season, fill = Garden), outlier.size = 0.5, size = 0.25, colour = "black") +
-  scale_fill_brewer("Garden Yields:\nExperimental", palette="OrRd") +
-  stat_summary(data = yields,
-               mapping = aes(y = `Yield by clump area`, x = Season, fill = Garden),
-               fun.y=mean,
-               colour="black", 
-               geom="point",
-               position=position_dodge(width=0.75),
-               size = 0.75,
-               shape = 8) +
-  geom_line(data = PFP_VEP_yields %>%
-              dplyr::mutate(Garden = ifelse(Garden == "KUG","KUG","CDG, POG, PLC")) %>%
-              unique(),
-            mapping = aes(x=Season, y=Yield, group = Garden, linetype = Garden), 
-            size = 0.25
-  ) +
-  scale_linetype("Garden Yields:\nVEP Estimates") +
-  ylab("Yield (kg/ha)") +
-  theme(axis.text=element_text(size=6, color = "black"),
-        title=element_text(size=8,face="bold", color = "black"),
-        legend.text=element_text(size=6, color = "black"))
-
-dev.off()
-distill("./OUTPUT/FIGURES/yields_clump_spacing.pdf")
-
-##### END yields_clump_spacing.pdf #####
+##### END yields.pdf #####
 
 ## Calculate correlation between each garden's 
 ## mean experimental and estimated yield
-yields %>%
-  dplyr::select(Garden, Season, `Standardized yield`) %>%
-  dplyr::group_by(Garden, Season) %>%
-  dplyr::summarise(`Standardized yield` = mean(`Standardized yield`)) %>%
-  dplyr::full_join(PFP_VEP_yields, by = c("Garden","Season")) %>%
-  dplyr::rename(`Experimental yield` = `Standardized yield`, `Estimated yield` = Yield) %>%
-  dplyr::mutate(`Experimental yield` = scale(`Experimental yield`) %>% as.numeric(), 
-                `Estimated yield` = scale(`Estimated yield`) %>% as.numeric()) %>%
-  dplyr::group_by(Garden) %>% 
-  do(tidy(cor.test(.$`Estimated yield`, .$`Experimental yield`))) %>%
+yield_correlations <- garden_yields %>% 
+  do(tidy(cor.test(.$`VEP estimated yield`, .$`PFP experimental yield`))) %>%
   dplyr::select(Garden, estimate, p.value, conf.low, conf.high) %>%
   dplyr::rename(Correlation = estimate, 
                 `P-value` = p.value, 
                 `Lower CI` = conf.low, 
-                `Upper CI` = conf.high) %T>%
-  write_csv(path = "./OUTPUT/TABLES/yield_correlations_standardized.csv") %>%
-  dplyr::ungroup() %>%
-  dplyr::summarise(mean(Correlation))
+                `Upper CI` = conf.high) 
+yield_correlations %>% 
+  dplyr::mutate(Correlation = round(Correlation, digits = 2),
+                `P-value` = round(`P-value`, digits = 3),
+                `Lower CI` = round(`Lower CI`, digits = 2),
+                `Upper CI` = round(`Upper CI`, digits = 2)) %>%
+  write_csv(path = "./OUTPUT/TABLES/yield_correlations.csv")
 
-##### yield_correlations_standardized.pdf #####
+##### yield_correlations.pdf #####
 ## A visual comparison between the scaled experimental and VEP estimated yields
 ## with linear regression
-phi <- (1+sqrt(5))/2
 mai <- c(0.25,0.25,0,0)
 fig.width <- 5
-fig.height <- fig.width/phi
+fig.height <- 5
 
-quartz(file="./OUTPUT/FIGURES/yield_correlations_standardized.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
+quartz(file="./OUTPUT/FIGURES/yield_correlations.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
 par(mai=mai, xpd=F)
 
-yields %>%
-  dplyr::select(Garden, Season, `Standardized yield`) %>%
-  dplyr::group_by(Garden, Season) %>%
-  dplyr::summarise(`Standardized yield` = mean(`Standardized yield`)) %>%
-  dplyr::full_join(PFP_VEP_yields, by = c("Garden","Season")) %>%
-  dplyr::rename(`Experimental yield` = `Standardized yield`, `Estimated yield` = Yield) %>%
-  dplyr::mutate(`Experimental yield` = scale(`Experimental yield`) %>% as.numeric(), 
-                `Estimated yield` = scale(`Estimated yield`) %>% as.numeric()) %>%
-  ggplot(aes(x = `Estimated yield`, y = `Experimental yield`, color = Garden)) + 
+garden_yields %>%
+  dplyr::mutate(`PFP experimental yield (scaled)` = scale(`PFP experimental yield`) %>% as.numeric(), 
+                `VEP estimated yield (scaled)` = scale(`VEP estimated yield`) %>% as.numeric()) %>%
+  ggplot(aes(x = `VEP estimated yield (scaled)`, y = `PFP experimental yield (scaled)`, color = Garden)) + 
   geom_smooth(method=lm,   # Add linear regression lines
               se=FALSE,
-              size = 0.5) +   # Don't add shaded confidence region
+              size = 0.5,
+              fullrange = T) +   # Don't add shaded confidence region
   geom_point() +
+  coord_equal() +
   scale_colour_brewer("Garden", palette="OrRd") +
   theme(axis.text=element_text(size=6, color = "black"),
         title=element_text(size=8,face="bold", color = "black"),
         legend.text=element_text(size=6, color = "black"))
 
 dev.off()
-distill("./OUTPUT/FIGURES/yield_correlations_standardized.pdf")
+distill("./OUTPUT/FIGURES/yield_correlations.pdf")
 
-##### END yield_correlations_standardized.pdf #####
+##### END yield_correlations.pdf #####
 
-## Calculate correlation between each garden's 
-## mean experimental and estimated yield
-yields %>%
-  dplyr::select(Garden, Season, `Yield by clump area`) %>%
-  dplyr::group_by(Garden, Season) %>%
-  dplyr::summarise(`Yield by clump area` = mean(`Yield by clump area`)) %>%
-  dplyr::full_join(PFP_VEP_yields, by = c("Garden","Season")) %>%
-  dplyr::rename(`Experimental yield` = `Yield by clump area`, `Estimated yield` = Yield) %>%
-  dplyr::mutate(`Experimental yield` = scale(`Experimental yield`) %>% as.numeric(), 
-                `Estimated yield` = scale(`Estimated yield`) %>% as.numeric()) %>%
-  dplyr::group_by(Garden) %>% 
-  do(tidy(cor.test(.$`Estimated yield`, .$`Experimental yield`))) %>%
-  dplyr::select(Garden, estimate, p.value, conf.low, conf.high) %>%
-  dplyr::rename(Correlation = estimate, 
-                `P-value` = p.value, 
-                `Lower CI` = conf.low, 
-                `Upper CI` = conf.high) %T>%
-  write_csv(path = "./OUTPUT/TABLES/yield_correlations_clump_spacing.csv") %>%
-  dplyr::ungroup() %>%
-  dplyr::summarise(mean(Correlation))
+##### Yield mean variance table #####
+garden_prod_vepi <- garden_locations %>%
+  rgeos::gCentroid(byid=T) %>% # Get the centroid under each garden
+  sp::spTransform(sp::CRS(raster::projection(vepi.paleoprod))) %>% # transform into the same projection
+  raster::extract(x = vepi.paleoprod) %>%
+  t() %>%
+  tibble::as_tibble()  %>%
+  set_colnames(garden_locations$Abbreviation) %>%
+  dplyr::mutate(Year = 600:1300) %>% 
+  tidyr::gather(Garden,Yield,CDG:PLC) %>%
+  dplyr::group_by(Garden) %>%
+  dplyr::summarise(`VEP estimated yield: mean, ancient` = mean(`Yield`),
+                   `VEP estimated yield: SD, ancient` = sd(`Yield`)
+  )
 
-##### yield_correlations_clump_spacing.pdf #####
-## A visual comparison between the scaled experimental and VEP estimated yields
-## with linear regression
-phi <- (1+sqrt(5))/2
-mai <- c(0.25,0.25,0,0)
-fig.width <- 5
-fig.height <- fig.width/phi
-
-quartz(file="./OUTPUT/FIGURES/yield_correlations_clump_spacing.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
-par(mai=mai, xpd=F)
-
-yields %>%
-  dplyr::select(Garden, Season, `Yield by clump area`) %>%
-  dplyr::group_by(Garden, Season) %>%
-  dplyr::summarise(`Yield by clump area` = mean(`Yield by clump area`)) %>%
-  dplyr::full_join(PFP_VEP_yields, by = c("Garden","Season")) %>%
-  dplyr::rename(`Experimental yield` = `Yield by clump area`, `Estimated yield` = Yield) %>%
-  dplyr::mutate(`Experimental yield` = scale(`Experimental yield`) %>% as.numeric(), 
-                `Estimated yield` = scale(`Estimated yield`) %>% as.numeric()) %>%
-  ggplot(aes(x = `Estimated yield`, y = `Experimental yield`, color = Garden)) + 
-  geom_smooth(method=lm,   # Add linear regression lines
-              se=FALSE,
-              size = 0.5) +   # Don't add shaded confidence region
-  geom_point() +
-  scale_colour_brewer("Garden", palette="OrRd") +
-  theme(axis.text=element_text(size=6, color = "black"),
-        title=element_text(size=8,face="bold", color = "black"),
-        legend.text=element_text(size=6, color = "black"))
-
-dev.off()
-distill("./OUTPUT/FIGURES/yield_correlations_clump_spacing.pdf")
-
-##### END yield_correlations_clump_spacing.pdf #####
+yield_mean_variance <- garden_yields %>%
+  dplyr::summarise_each(funs = c("mean","sd"), `PFP experimental yield`,`VEP estimated yield`) %>%
+  dplyr::rename(`PFP experimental yield: mean` = `PFP experimental yield_mean`, 
+                `VEP estimated yield: mean, modern` = `VEP estimated yield_mean`,
+                `PFP experimental yield: SD` = `PFP experimental yield_sd`, 
+                `VEP estimated yield: SD, modern` = `VEP estimated yield_sd`) %>%
+  dplyr::left_join(garden_prod_vepi, by = "Garden") %>%
+  dplyr::select(Garden,
+                `PFP experimental yield: mean`,
+                `VEP estimated yield: mean, modern`,
+                `VEP estimated yield: mean, ancient`,
+                `PFP experimental yield: SD`,
+                `VEP estimated yield: SD, modern`,
+                `VEP estimated yield: SD, ancient`) 
+yield_mean_variance %>%
+  dplyr::mutate(Garden,
+                `PFP experimental yield: mean` = round(`PFP experimental yield: mean`, digits = 1),
+                `VEP estimated yield: mean, modern` = round(`VEP estimated yield: mean, modern`, digits = 1),
+                `VEP estimated yield: mean, ancient` = round(`VEP estimated yield: mean, ancient`, digits = 1),
+                `PFP experimental yield: SD` = round(`PFP experimental yield: SD`, digits = 1),
+                `VEP estimated yield: SD, modern` = round(`VEP estimated yield: SD, modern`, digits = 1),
+                `VEP estimated yield: SD, ancient` = round(`VEP estimated yield: SD, ancient`, digits = 1)) %>%
+  write_csv(path = "./OUTPUT/TABLES/yield_mean_variance.csv")
 
 ##### vepi_productivity.pdf #####
-# A smoothing distribution to use throughout the analyses
-# This is a 21-year wide Gaussian distribution with a 
-# mean of 0 and standard deviation of 5 years
-dist <- dnorm(seq(-10,10,1), sd=5)
+# Force Raster to load large rasters into memory
+raster::rasterOptions(chunksize=2e+08,maxmemory=2e+09)
+vepi.paleoprod <- vepi.paleoprod * 1
 
-# Import VEPI Paleoproductivity
-VEPI.paleoprod <- raster::brick("./DATA/VEPI_paleoprod.tif")
-
-VEPI.paleoprod.mean <- mean(VEPI.paleoprod[])
-VEPI.paleoprod.mean.spatial <- mean(VEPI.paleoprod)
-VEPI.paleoprod.mean.temporal <- cellStats(VEPI.paleoprod, mean)
-VEPI.paleoprod.mean.temporal.smooth <- stats::filter(VEPI.paleoprod.mean.temporal,filter = dist)
-
-plot.width <- 5
-plot.height <- plot.width * (nrow(VEPI.paleoprod)/ncol(VEPI.paleoprod))
-
-fig.width <- plot.width + 0.2
-fig.height <- plot.height + 0.3 + 1.5
-
-palette <- brewer.pal(11, "RdYlGn")
-colors.begin <- rev(colorRampPalette(rev(palette[c(1:6)]),bias=1.2)(round(VEPI.paleoprod.mean)))
-colors.mid <- colorRampPalette(palette[c(6:11)],bias=1.2)(600 - round(VEPI.paleoprod.mean))
-colors.end <- rep(palette[11],1900)
-colors <- c(colors.begin,colors.mid, colors.end)
-
-quartz(file="./OUTPUT/FIGURES/vepi_productivity.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=8, dpi=600)
-par(mai=c(1.5 + 0.2,0.1,0.1,0.1), xpd=F)
-
-plot(1, type='n', xlab="", ylab="", 
-     xlim=c(extent(VEPI.paleoprod)@xmin,extent(VEPI.paleoprod)@xmax),
-     ylim=c(extent(VEPI.paleoprod)@ymin,extent(VEPI.paleoprod)@ymax), 
-     xaxs="i", yaxs="i", axes=FALSE, main='')
-plot(VEPI.paleoprod.mean.spatial, maxpixels=1000000, zlim=c(0,2500),add=T, col=colors, useRaster=TRUE, legend=FALSE)
-
-par(mai=c(0.1,0.1,0.2 + plot.width * (nrow(VEPI.paleoprod)/ncol(VEPI.paleoprod)),0.1), xpd=T, new=T)
-plot(1, type='n', xlab="", ylab="", xlim=c(0,5), ylim=c(0,600), xaxs="i", yaxs="i", axes=FALSE, main='')
-
-legend.breaks <- seq(from=0, to=2500, length.out=(length(colors)+1))
-rect(col=colors[1:600], border=NA, ybottom=0:599, ytop=1:600, xleft=0.15, xright=0.35, xpd=T)
-# text(x = 0.5, y=0, labels=0, adj=c(0.5,0), cex=0.65, family='Helvetica Bold')
-# text(x = 0.5, y=600, labels="> 600", adj=c(0.5,0.5), cex=0.65, family='Helvetica Bold')
-# text(x = 0.5, y=round(VEPI.paleoprod.mean), labels=round(VEPI.paleoprod.mean), adj=c(0.5,0.5), cex=0.65, family='Helvetica Bold')
-text(x = 0, y=300, labels="Yeild (kg/ha)", adj=c(0.5,1), cex=1, srt = 90, family='Helvetica Bold')
-text(x = 0.5, y = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,600), labels = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,"> 600"), adj=c(0.5,0.5), cex=0.8, family='Helvetica Bold')
-
-par(mai=c(0.1,0.85,0.2 + plot.width * (nrow(VEPI.paleoprod)/ncol(VEPI.paleoprod)),0.1), xpd=T, new=T)
-plot(1, type='n', xlab="", ylab="", xlim=c(580,1320), ylim=c(0,600), xaxs="i", yaxs="i", axes=FALSE, main='')
-abline(h = round(VEPI.paleoprod.mean),col = "gray50", lty = 1, xpd = F)
-segments(x0 = seq(600,1300,100), x1 = seq(600,1300,100), y0 = 0, y1 = 500, col = "gray50", lty = 3)
-lines(y = VEPI.paleoprod.mean.temporal, x = 600:1300)
-lines(y = VEPI.paleoprod.mean.temporal.smooth, x = 600:1300, col = "red")
-text(x = seq(600,1300,100), y = 550, labels = seq(600,1300,100), adj = c(0.5,1), cex=0.8, family='Helvetica Bold')
-text(x = 950, y = 600, labels = "Year AD", adj = c(0.5,1), cex=1, family='Helvetica Bold')
-
-axis(2, at = c(0,100,200,round(VEPI.paleoprod.mean),300,400,500,600), labels = F)
-dev.off()
-distill("./OUTPUT/FIGURES/vepi_productivity.pdf")
+space_time_plot(the_brick = vepi.paleoprod,
+                out_file = "./OUTPUT/FIGURES/vepi_productivity.pdf",
+                timelim = c(600,1300),
+                timeaxis = seq(700,1300,100),
+                zlim_mid_range = c(0,500),
+                zlab = "Yeild (kg/ha)",
+                zaxis = c(100,200,300,400))
 ##### END vepi_productivity.pdf #####
 
-##### Burns and Van West figures #####
-file.copy("./DATA/BURNS.pdf","./OUTPUT/FIGURES/burns.pdf", overwrite = T)
-distill("./OUTPUT/FIGURES/burns.pdf", gray = T)
-
-file.copy("./DATA/VANWEST.pdf","./OUTPUT/FIGURES/vanwest.pdf", overwrite = T)
-distill("./OUTPUT/FIGURES/vanwest.pdf", gray = T)
-##### END Burns and Van West figures #####
-
 ##### Zip up SI data #####
-zip("./Varien_Bocinsky_2017.zip", c("./DATA/","./Ethnobiology.R","./Ethnobiology.Rproj","./src/"), flags = "-r9X", extras = "-r --exclude=*.DS_Store* --exclude=*.git*")
+zip("./Varien_Bocinsky_2017.zip", c("./DATA/","./Varien_Bocinsky_2017.R","./Varien_Bocinsky_2017.Rproj","./src/","./README.md"), flags = "-r9X", extras = "-r --exclude=*.DS_Store* --exclude=*.git*")
 ##### END Zip up SI data #####
-
