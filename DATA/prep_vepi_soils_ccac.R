@@ -15,10 +15,6 @@ scmred <- unz("./DATA/VEPI_data.zip",
   dplyr::mutate(VPSCode = row_number()) %>%
   dplyr::rename(SCM_RED = value)
 
-unz("./DATA/VEPI_data.zip",
-    filename = "VEPI_data/newsoil.data") %>%
-  scan()
-
 # Load the VEPI soils information
 vepi <- readr::read_csv("./DATA/village_soil.csv") %>%
   dplyr::left_join(scmred, by = "VPSCode")
@@ -144,7 +140,7 @@ vepi_raster_coldcorr[vepi_raster_coldcorr>1] <- 1
 
 # get handplanting reduction raster
 soils <- unz("./DATA/VEPI_data.zip",
-             filename = "VEPI_data/newsoil.data") %>%
+             filename = "VEPI_data/soil.data") %>%
   scan()
 VEPI.soils.rast <- vepi_raster %>%
   raster::setValues(soils)
