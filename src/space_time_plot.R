@@ -7,7 +7,7 @@ space_time_plot <- function(the_brick,
                             zlim_mid_range = NULL,
                             zlab,
                             zaxis,
-                            zlim_colors = brewer.pal(11, "RdYlGn"),
+                            zlim_colors = brewer.pal(9, "YlGn"),
                             fig_width = 5,
                             graph_height = 1.5,
                             margin = 0.1,
@@ -35,30 +35,24 @@ space_time_plot <- function(the_brick,
   } 
   
   colors.begin.range <- c(zlim[1],max(zlim[1],zlim_mid_range[1]-1))
-  colors.mid.lower.range <- c(zlim_mid_range[1],mean.all-1)
-  colors.mid.upper.range <- c(mean.all,zlim_mid_range[2])
   colors.end.range <- c(zlim_mid_range[2]+1,zlim[2])
   
   colors.begin <- rep(head(zlim_colors,1),
                       length(colors.begin.range[1]:colors.begin.range[2]))
-  colors.mid.lower <- rev(colorRampPalette(rev(zlim_colors[c(1:(ceiling(length(zlim_colors)/2)))]),bias=1.2)(length(colors.mid.lower.range[1]:colors.mid.lower.range[2])))
-  colors.mid.upper <- colorRampPalette(zlim_colors[c((ceiling(length(zlim_colors)/2)):11)],bias=1.2)(length(colors.mid.upper.range[1]:colors.mid.upper.range[2]))
+  colors.mid <- colorRampPalette(zlim_colors)(length(zlim_mid_range[1]:zlim_mid_range[2]))
   colors.end <- rep(tail(zlim_colors,1),
                     length(colors.end.range[1]:colors.end.range[2]))
   colors <- c(colors.begin,
-              colors.mid.lower,
-              colors.mid.upper,
+              colors.mid,
               colors.end)
   
-  quartz(file = out_file,
+  cairo_pdf(filename = out_file,
          width = fig_width,
          height = fig_height,
-         antialias = FALSE, 
+         antialias = "none", 
          bg = "white",
-         type = 'pdf',
-         family = "Gulim",
          pointsize = 8,
-         dpi = 600)
+         fallback_resolution = 600)
   par(mai=c(graph_height + (margin * 2),
             margin,
             margin,

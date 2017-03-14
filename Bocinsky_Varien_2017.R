@@ -46,6 +46,7 @@ FedData::pkg_test("broom")
 FedData::pkg_test("maptools")
 FedData::pkg_test("dplyr")
 FedData::pkg_test("doParallel")
+FedData::pkg_test("geojsonio")
 
 # Load other useful functions
 for(f in list.files("./src", pattern = ".R", full.names = T)){
@@ -361,7 +362,10 @@ yields <- ears %>%
                 `Net kernel weight`,
                 # `Yield by clump area`,
                 `PFP experimental yield`) %>% # reorder columns
-  dplyr::group_by(Season, Garden) # calculations are by season and garden
+  dplyr::group_by(Season, Garden) %>% # calculations are by season and garden 
+  dplyr::rename(`Spacing (m)` = Spacing,
+                `Net kernel weight (g)` = `Net kernel weight`,
+                `PFP experimental yield (kg/ha)` = `PFP experimental yield`)
 
 readr::write_csv(yields,"./OUTPUT/DATA/yields.csv")
 
@@ -407,7 +411,9 @@ vep_soil_polygons <- ggplot(soils_VEPI_yields.df) +
   ggtitle("Soil mapunit polygons") +
   geom_path(color="white") +
   coord_equal() +
-  scale_fill_brewer(name = NULL, type="qual", palette = "Set3") +
+  scale_fill_brewer(name = NULL,
+                    type="qual",
+                    palette = "Set3") +
   geom_polygon(data = garden_locations.df, mapping = aes(long,lat,group=group), inherit.aes = F) +
   geom_text(data = garden_locations %>%
               rgeos::gCentroid(byid=T) %>% as.data.frame() %>%
@@ -432,7 +438,7 @@ vep_soil_polygons <- ggplot(soils_VEPI_yields.df) +
 
 ##### END garden_soils_map.pdf #####
 
-##### soils_vars_grid.pdf #####
+##### figure_4.pdf #####
 ## A grid of maps showing the salient soil characteristics
 ## Maps of soil characteristics included in the Village Ecodynamics Project 
 ## maize paleoproductivity reconstructions.
@@ -538,7 +544,7 @@ multiplot <- function(vars, limits, titles){
 }
 vars <- c("NYProd_lb_ac","AWC_Lower_median","SCM_RED")
 limits <- list(c(0,1250), c(0,10), c(0,1))
-titles <- c("Normal-year productivity (lb/ac)", "AWC 6–60 inches (in/in)", "Hand planting factor")
+titles <- c("Normal-year productivity (lb/ac)", "AWC 6–60 inches (in)", "Hand planting factor")
 
 the.plots <- multiplot(vars, limits, titles)
 
@@ -548,52 +554,47 @@ mai <- c(0,0,0,0)
 fig.width <- 7.5
 fig.height <- 8.5
 
-cairo_pdf(file="./OUTPUT/FIGURES/soils_vars_grid.pdf", width=fig.width, height=fig.height, antialias="none", bg="white", pointsize=6)
+cairo_pdf(file="./OUTPUT/FIGURES/figure_4.pdf",
+          width=fig.width,
+          height=fig.height,
+          antialias="none",
+          bg="white",
+          pointsize=6)
 par(mai=mai, xpd=F)
 gridExtra::grid.arrange(grobs = the.plots, nrow=3)
 dev.off()
-distill("./OUTPUT/FIGURES/soils_vars_grid.pdf")
-##### END soils_vars_grid.pdf #####
+distill("./OUTPUT/FIGURES/figure_4.pdf")
+##### END figure_4.pdf #####
 
 
-##### garden_yields.csv #####
+##### table_2.csv #####
 ## Basic data on each garden
 garden_yields <- yields %>%
   dplyr::select(Garden, Season, 
                 # `Yield by clump area`, 
-                `PFP experimental yield`) %>%
+                `PFP experimental yield (kg/ha)`) %>%
   dplyr::group_by(Garden, Season) %>%
   dplyr::summarise(
     # `Yield by clump area` = mean(`Yield by clump area`), 
-    `PFP experimental yield` = mean(`PFP experimental yield`)
+    `PFP experimental yield (kg/ha)` = mean(`PFP experimental yield (kg/ha)`)
   ) %>%
   dplyr::left_join(yields %>%
-                     dplyr::select(Garden, Season, Variety, Clumps, Spacing) %>%
+                     dplyr::select(Garden, Season, Variety, Clumps, `Spacing (m)`) %>%
                      unique(), by = c("Garden","Season")) %>%
-  dplyr::select(Garden, Season, Variety, Clumps, Spacing,
+  dplyr::select(Garden, Season, Variety, Clumps, `Spacing (m)`,
                 # `Yield by clump area`,
-                `PFP experimental yield`) %>%
+                `PFP experimental yield (kg/ha)`) %>%
   dplyr::left_join(PFP_VEP_yields, by=c("Garden","Season")) %>%
-  dplyr::rename(`VEP estimated yield` = Yield)
+  dplyr::rename(`VEP estimated yield (kg/ha)` = Yield)
 
 garden_yields %>% 
-    dplyr::mutate(`PFP experimental yield` = round(`PFP experimental yield`, digits = 1),
-                  `VEP estimated yield` = round(`VEP estimated yield`, digits = 1)) %>%
-      write_csv(path = "./OUTPUT/TABLES/garden_yields.csv")
+    dplyr::mutate(`PFP experimental yield (kg/ha)` = round(`PFP experimental yield (kg/ha)`, digits = 1),
+                  `VEP estimated yield (kg/ha)` = round(`VEP estimated yield (kg/ha)`, digits = 1)) %>%
+      write_csv(path = "./OUTPUT/TABLES/table_2.csv")
 
-##### END garden_yields.csv #####
+##### END table_2.csv #####
 
-##### clump_yields.csv #####
-## Basic data on each clump
-clump_yields <- yields %>%
-  dplyr::select(Garden, Season, Clump, `Net kernel weight`) %>%
-  dplyr::arrange(Garden, Season, Clump) 
-
-clump_yields %>%
-  write_csv(path = "./OUTPUT/TABLES/clump_yields.csv")
-##### END clump_yields.csv #####
-
-##### soils_data.csv #####
+##### table_1.csv #####
 soils_data <- garden_locations %>%
   rgeos::gCentroid(byid=T) %>% # Get the centroid under each garden
   sp::spTransform(sp::CRS(raster::projection(vepi.soils.ccac.raster))) %>% # transform into the same projection
@@ -611,16 +612,16 @@ soils_data %>%
                 `VEP soil ID` = VPSCode,
                 `VEP soil cluster` = CLUSTER,
                 `Normal-year prod. (lb/ac)` = NYProd_lb_ac,
-                `AWC 6–60 inches (in/in)` = AWC_Lower_median,
+                `AWC 6–60 inches (in)` = AWC_Lower_median,
                 `Hand planting factor` = SCM_RED,
                 `PFP Garden` = Garden) %>%
-  dplyr::mutate(`AWC 6–60 inches (in/in)` = round(`AWC 6–60 inches (in/in)`, digits = 2),
+  dplyr::mutate(`AWC 6–60 inches (in)` = round(`AWC 6–60 inches (in)`, digits = 2),
                 `Hand planting factor` = round(`Hand planting factor`, digits = 2),
                 `Normal-year prod. (lb/ac)` = round(`Normal-year prod. (lb/ac)`, digits = 1)) %>%
-  write_csv(path = "./OUTPUT/TABLES/soils_data.csv")
-##### END soils_data.csv #####
+  write_csv(path = "./OUTPUT/TABLES/table_1.csv")
+##### END table_1.csv #####
 
-##### yields.pdf #####
+##### figure_5.pdf #####
 ## A visual comparison between the experimental and VEP estimated yields
 ## Experimental (PFP) and estimated (VEP) garden yields.
 ## Box plots indicate the distribution of experimental yields as extrapolated from individual clumps.
@@ -631,18 +632,18 @@ mai <- c(0.25,0.25,0,0)
 fig.width <- 5
 fig.height <- 2.25
 
-quartz(file="./OUTPUT/FIGURES/yields.pdf", width=fig.width, height=fig.height, antialias=FALSE, bg="white", type='pdf', family="Gulim", pointsize=6, dpi=600)
+cairo_pdf(file="./OUTPUT/FIGURES/figure_5.pdf", width=fig.width, height=fig.height, antialias="none", bg="white", pointsize=6, fallback_resolution = 600)
 par(mai=mai, xpd=F)
 
 ggplot() + 
   geom_boxplot(data = yields,
-               mapping = aes(y = `PFP experimental yield`, x = Season, fill = Garden),
+               mapping = aes(y = `PFP experimental yield (kg/ha)`, x = Season, fill = Garden),
                outlier.size = 0.5,
                size = 0.25,
                colour = "black") +
   scale_fill_brewer("Garden Yields:\nPFP Experiments", palette="OrRd") +
   stat_summary(data = yields,
-               mapping = aes(y = `PFP experimental yield`, x = Season, fill = Garden),
+               mapping = aes(y = `PFP experimental yield (kg/ha)`, x = Season, fill = Garden),
                fun.y=mean,
                colour="black", 
                geom="point",
@@ -660,25 +661,25 @@ ggplot() +
         legend.text=element_text(size=6, color = "black"))
 
 dev.off()
-distill("./OUTPUT/FIGURES/yields.pdf")
+distill("./OUTPUT/FIGURES/figure_5.pdf")
 
-##### END yields.pdf #####
+##### END figure_5.pdf #####
 
 ## Calculate correlation between each garden's 
 ## mean experimental and estimated yield
 yield_correlations <- garden_yields %>% 
-  do(tidy(cor.test(.$`VEP estimated yield`, .$`PFP experimental yield`))) %>%
+  do(tidy(cor.test(.$`VEP estimated yield (kg/ha)`, .$`PFP experimental yield (kg/ha)`))) %>%
   dplyr::select(Garden, estimate, p.value, conf.low, conf.high) %>%
-  dplyr::rename(Correlation = estimate, 
+  dplyr::rename(`Correlation (r)` = estimate, 
                 `P-value` = p.value, 
                 `Lower CI` = conf.low, 
                 `Upper CI` = conf.high) 
 yield_correlations %>% 
-  dplyr::mutate(Correlation = round(Correlation, digits = 2),
+  dplyr::mutate(`Correlation (r)` = round(`Correlation (r)`, digits = 2),
                 `P-value` = round(`P-value`, digits = 3),
                 `Lower CI` = round(`Lower CI`, digits = 2),
                 `Upper CI` = round(`Upper CI`, digits = 2)) %>%
-  write_csv(path = "./OUTPUT/TABLES/yield_correlations.csv")
+  write_csv(path = "./OUTPUT/TABLES/table_4.csv")
 
 ##### Yield mean variance table #####
 garden_prod_vepi <- garden_locations %>%
@@ -696,11 +697,11 @@ garden_prod_vepi <- garden_locations %>%
   )
 
 yield_mean_variance <- garden_yields %>%
-  dplyr::summarise_each(funs = c("mean","sd"), `PFP experimental yield`,`VEP estimated yield`) %>%
-  dplyr::rename(`PFP experimental yield: mean` = `PFP experimental yield_mean`, 
-                `VEP estimated yield: mean, modern` = `VEP estimated yield_mean`,
-                `PFP experimental yield: SD` = `PFP experimental yield_sd`, 
-                `VEP estimated yield: SD, modern` = `VEP estimated yield_sd`) %>%
+  dplyr::summarise_each(funs = c("mean","sd"), `PFP experimental yield (kg/ha)`,`VEP estimated yield (kg/ha)`) %>%
+  dplyr::rename(`PFP experimental yield: mean` = `PFP experimental yield (kg/ha)_mean`, 
+                `VEP estimated yield: mean, modern` = `VEP estimated yield (kg/ha)_mean`,
+                `PFP experimental yield: SD` = `PFP experimental yield (kg/ha)_sd`, 
+                `VEP estimated yield: SD, modern` = `VEP estimated yield (kg/ha)_sd`) %>%
   dplyr::left_join(garden_prod_vepi, by = "Garden") %>%
   dplyr::select(Garden,
                 `PFP experimental yield: mean`,
@@ -717,27 +718,33 @@ yield_mean_variance %>%
                 `PFP experimental yield: SD` = round(`PFP experimental yield: SD`, digits = 1),
                 `VEP estimated yield: SD, modern` = round(`VEP estimated yield: SD, modern`, digits = 1),
                 `VEP estimated yield: SD, ancient` = round(`VEP estimated yield: SD, ancient`, digits = 1)) %>%
-  write_csv(path = "./OUTPUT/TABLES/yield_mean_variance.csv")
+  dplyr::rename(`PFP experimental yield: mean (kg/ha)` = `PFP experimental yield: mean`,
+                `VEP estimated yield: mean, modern (kg/ha)` = `VEP estimated yield: mean, modern`,
+                `VEP estimated yield: mean, ancient (kg/ha)` = `VEP estimated yield: mean, ancient`,
+                `PFP experimental yield: SD (kg/ha)` = `PFP experimental yield: SD`,
+                `VEP estimated yield: SD, modern (kg/ha)` = `VEP estimated yield: SD, modern`,
+                `VEP estimated yield: SD, ancient (kg/ha)` = `VEP estimated yield: SD, ancient`) %>%
+  write_csv(path = "./OUTPUT/TABLES/table_3.csv")
 
-##### vepi_productivity.pdf #####
+##### figure_3.pdf #####
 # Force Raster to load large rasters into memory
 raster::rasterOptions(chunksize=2e+08,maxmemory=2e+09)
 vepi.paleoprod <- vepi.paleoprod * 1
 
 space_time_plot(the_brick = vepi.paleoprod,
-                out_file = "./OUTPUT/FIGURES/vepi_productivity.pdf",
+                out_file = "./OUTPUT/FIGURES/figure_3.pdf",
                 timelim = c(600,1300),
                 timeaxis = seq(700,1300,100),
                 zlim_mid_range = c(0,500),
                 zlab = "Yeild (kg/ha)",
                 zaxis = c(100,200,300,400))
-##### END vepi_productivity.pdf #####
+##### END figure_3.pdf #####
 
 # Distill Burns and Van West figures.
-file.copy("./DATA/BURNS.pdf","./OUTPUT/FIGURES/burns_productivity.pdf", overwrite = TRUE)
-distill("./OUTPUT/FIGURES/burns_productivity.pdf")
-file.copy("./DATA/VANWEST.pdf","./OUTPUT/FIGURES/vanwest_productivity.pdf", overwrite = TRUE)
-distill("./OUTPUT/FIGURES/vanwest_productivity.pdf")
+file.copy("./DATA/BURNS.pdf","./OUTPUT/FIGURES/figure_1.pdf", overwrite = TRUE)
+distill("./OUTPUT/FIGURES/figure_1.pdf")
+file.copy("./DATA/VANWEST.pdf","./OUTPUT/FIGURES/figure_2.pdf", overwrite = TRUE)
+distill("./OUTPUT/FIGURES/figure_2.pdf")
 
 ##### Zip up SI data #####
 zip("./Bocinsky_Varien_2017.zip", c("./DATA/","./Bocinsky_Varien_2017.R","./Bocinsky_Varien_2017.Rproj","./src/","./README.md"), flags = "-r9X", extras = "-r --exclude=*.DS_Store* --exclude=*.git*")
