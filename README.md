@@ -1,10 +1,10 @@
 ### Calibrating Maize Paleoproduction Models using Experimental Data
 
-This is the script for the analyses in Varien and Bocinsky, under review:
+This is the script for the analyses in Bocinsky and Varien 2017:
 
-Varien, Mark D. and R. Kyle Bocinsky. Under review. Calibrating Maize Paleoproduction Models using Experimental Data. *Ethnobiology*.
+R. Kyle Bocinsky and Mark D. Varien. 2017. Calibrating Maize Paleoproduction Models using Experimental Data. *Ethnobiology* 37(2).
 
-To run, clone this repository, then open `Varien_Bocinsky_2017.Rproj` in RStudio and then the `Varien_Bocinsky_2017.R` script. Run it all (⌘-A then ⌘-return).
+To run, clone this repository, then open `Bocinsky_Varien_2017.Rproj` in RStudio and then the `Bocinsky_Varien_2017.R` script. Run it all (⌘-A then ⌘-return).
 
 The analysis consists of three components. First, VEP-style paleoproduction estimates are generated for the locations of the Pueblo Farming Project gardens. Then, PFP data are analysed to estimate standard productivity across gardens. Finally, these data are brought together in a series of figures to be used in the manuscript.
 

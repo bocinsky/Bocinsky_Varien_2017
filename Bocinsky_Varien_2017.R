@@ -1,6 +1,6 @@
 ## This is the script for the analyses in Varien and Bocinsky, under review:
-## R. Kyle Bocinsky and Mark D. Varien. Under review. Calibrating Maize 
-## Paleoproduction Models using Experimental Data. Ethnobiology.
+## R. Kyle Bocinsky and Mark D. Varien. 2017. Calibrating Maize 
+## Paleoproduction Models using Experimental Data. Ethnobiology. 37(2).
 
 ## The analysis consists of three components. First, VEP-style paleoproduction
 ## estimates are generated for the locations of the Pueblo Farming Project gardens.
