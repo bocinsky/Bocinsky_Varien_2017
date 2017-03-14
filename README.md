@@ -1,5 +1,7 @@
 ### Calibrating Maize Paleoproduction Models using Experimental Data
 
+[![DOI](https://zenodo.org/badge/67527309.svg)](https://zenodo.org/badge/latestdoi/67527309)
+
 This is the script for the analyses in Bocinsky and Varien 2017:
 
 R. Kyle Bocinsky and Mark D. Varien. 2017. Calibrating Maize Paleoproduction Models using Experimental Data. *Ethnobiology* 37(2).
