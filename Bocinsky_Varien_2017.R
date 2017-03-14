@@ -747,5 +747,5 @@ file.copy("./DATA/VANWEST.pdf","./OUTPUT/FIGURES/figure_2.pdf", overwrite = TRUE
 distill("./OUTPUT/FIGURES/figure_2.pdf")
 
 ##### Zip up SI data #####
-zip("./Bocinsky_Varien_2017.zip", c("./DATA/","./Bocinsky_Varien_2017.R","./Bocinsky_Varien_2017.Rproj","./src/","./README.md"), flags = "-r9X", extras = "-r --exclude=*.DS_Store* --exclude=*.git*")
+# zip("./Bocinsky_Varien_2017.zip", c("./DATA/","./Bocinsky_Varien_2017.R","./Bocinsky_Varien_2017.Rproj","./src/","./README.md"), flags = "-r9X", extras = "-r --exclude=*.DS_Store* --exclude=*.git*")
 ##### END Zip up SI data #####
