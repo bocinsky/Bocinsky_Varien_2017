@@ -736,7 +736,7 @@ space_time_plot(the_brick = vepi.paleoprod,
                 timelim = c(600,1300),
                 timeaxis = seq(700,1300,100),
                 zlim_mid_range = c(0,500),
-                zlab = "Yeild (kg/ha)",
+                zlab = "Yield (kg/ha)",
                 zaxis = c(100,200,300,400))
 ##### END figure_3.pdf #####
 
