@@ -1,0 +1,14 @@
+texture,stratextsflag,rvindicator,texdesc,chkey,chtgkey
+CL,No ,Yes,Clay loam,51712444,103291098
+C,No ,No ,Clay,51712444,103291099
+L,No ,Yes,Loam,51712445,103291100
+C,No ,Yes,Clay,51712446,103291101
+CL,No ,No ,Clay loam,51712446,103291102
+L,No ,No ,Loam,51712446,103291103
+C,No ,Yes,Clay,51712447,103291104
+CL,No ,No ,Clay loam,51712447,103291105
+L,No ,No ,Loam,51712447,103291106
+SPM,No ,Yes,Slightly decomposed plant material,51712448,103291107
+CL,No ,Yes,Clay loam,51712449,103291108
+SICL,No ,No ,Silty clay loam,51712449,103291109
+L,No ,Yes,Loam,51712450,103291110

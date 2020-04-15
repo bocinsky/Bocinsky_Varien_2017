@@ -1,0 +1,13 @@
+texture,stratextsflag,rvindicator,texdesc,chkey,chtgkey
+L,No ,Yes,Loam,51712644,103291429
+CL,No ,Yes,Clay loam,51712645,103291430
+L,No ,No ,Loam,51712645,103291431
+L,No ,Yes,Loam,51712646,103291432
+L,No ,No ,Loam,51712677,103291483
+CL,No ,Yes,Clay loam,51712677,103291484
+SICL,No ,No ,Silty clay loam,51712677,103291485
+L,No ,Yes,Loam,51712678,103291486
+WB,No ,Yes,Weathered bedrock,51712679,103291487
+L,No ,Yes,Loam,51712680,103291488
+CL,No ,No ,Clay loam,51712680,103291489
+SICL,No ,No ,Silty clay loam,51712680,103291490

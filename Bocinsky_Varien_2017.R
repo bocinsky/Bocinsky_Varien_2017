@@ -79,10 +79,16 @@ seasons <- 2009:2015
 vepi.paleoprod <- raster::brick("./DATA/vepi_paleoprod.tif")
 
 # Load a polygon of the Indian Camp Ranch + Crow Canyon study area
-ccac <- rgdal::readOGR(dsn = "./DATA/ccac.geojson", "OGRGeoJSON", verbose = FALSE)
+# ccac <- rgdal::readOGR(dsn = "./DATA/ccac.geojson", "OGRGeoJSON", verbose = FALSE)
+ccac <- 
+  sf::read_sf("./DATA/ccac.geojson") %>%
+  as("Spatial")
 
 # Load the VEP I soils data for Indian Camp Ranch / CCAC
-vepi.soils.ccac <- rgdal::readOGR(dsn = "./DATA/vepi_soils_ccac.geojson", "OGRGeoJSON", verbose = FALSE)
+# vepi.soils.ccac <- rgdal::readOGR(dsn = "./DATA/vepi_soils_ccac.geojson", "OGRGeoJSON", verbose = FALSE)
+vepi.soils.ccac <- 
+  sf::read_sf("./DATA/vepi_soils_ccac.geojson") %>%
+  as("Spatial")
 
 ### PDSI ###
 # Kohler 2012: Steps 2--3 (pp. 90--92)
